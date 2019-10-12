@@ -1,0 +1,29 @@
+gcloud compute instances create market-data-service --image-family=debian-9 --image-project=debian-cloud --machine-type=g1-small --scopes userinfo-email,cloud-platform --metadata-from-file startup-script=startup-script.sh --tags api-service --zone=asia-northeast1-c
+
+gcloud compute firewall-rules create default-allow-http-8080 --allow tcp:8080 --source-ranges 0.0.0.0/0 --target-tags api-service --description ¨alllow¨
+
+gcloud compute instance-templates create market-data-service-template --image-family=debian-9 --image-project=debian-cloud --machine-type=g1-small --scopes userinfo-email,cloud-platform --metadata-from-file startup-script=startup-script.sh --tags api-service
+
+gcloud compute instance-groups managed create market-data-service-group --base-instance-name=market-data-service --size=3 --template=market-data-service-template --region=asia-northeast1
+
+gcloud compute health-checks create http api-health-check --port=8080 --request-path="/ping"
+
+gcloud beta compute instance-groups managed set -autohealing market-data-service-group --region=asia-northeast1 --health-check=api-health-check
+
+gcloud compute instance-groups managed resize market-data-service-group --size=2 --region=asia-northeast1
+
+gcloud compute instance-groups managed set-named-ports market-data-service-group --named-ports http:8080 --region=asia-northeast1
+
+gcloud compute backend-services create market-data-service --protocol HTTP --health-checks api-health-check --global
+
+gcloud compute url-maps create api-map --default-service market-data-service
+
+gcloud compute target-http-proxies create api-proxy --url-map api-map
+
+gcloud compute addresses create market-data-service-ip --ip-version=IPV4 --global
+
+export IP=`gcloud compute addresses describe market-data-service-ip --global --format=json | jq --raw-output '.address'`
+
+gcloud compute forwarding-rules create api-forwarding-rule --address $IP --global --target-http-proxy api-proxy --ports 80
+
+curl "http://$IP/ping?[1-100]" 
